@@ -32,8 +32,14 @@ class handler(BaseHTTPRequestHandler):
         
         # date 파라미터가 비어 있거나 ?date= 형태가 들어오지 않았다면, 오늘 날짜로 기본값 설정
         if not date_str or date_str == self.path:
-            today = datetime.now().strftime('%Y-%m-%d')
-            date_str = today
+            date_str = datetime.now().strftime('%Y-%m-%d')
+
+        # 문자열을 datetime 객체로 변환
+        try:
+            requested_date = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            self.send_error(400, f"Invalid date format: {date_str}")
+            return
 
         try:
             with open("mode.json", "r", encoding="utf-8") as file:
@@ -51,25 +57,40 @@ class handler(BaseHTTPRequestHandler):
         try:
             qqq_data = yf.Ticker("QQQ")
             recent_close_prices = qqq_data.history(period="1y")
+            # 지수 형태 맞추기
             recent_close_prices.index = pd.to_datetime(recent_close_prices.index)
+            # 금요일 데이터만 추출
             friday_data = recent_close_prices[recent_close_prices.index.weekday == 4]
 
+            # RSI 계산
             rsi_values = calculate_rsi(friday_data)
 
-            for i in range(1, len(rsi_values)):
-                qqq_rsi_late_late = rsi_values.iloc[i - 1]
-                qqq_rsi_late = rsi_values.iloc[i]
-                last_date = rsi_values.index[i].strftime('%Y-%m-%d')
+            # rsi_values: 날짜(DateTimeIndex)를 인덱스로, RSI를 값으로 가지고 있음
+            # step 1) requested_date 이하(과거) 데이터만 필터링
+            filtered_rsi = rsi_values.loc[rsi_values.index <= requested_date]
 
-                if last_date == date_str:
-                    mode = this_week_mode(qqq_rsi_late, qqq_rsi_late_late)
-                    add_data_to_json(last_date, mode)
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"date": last_date, "mode": mode}).encode())
-                    return
+            if len(filtered_rsi) < 2:
+                # 필요 최소 개수(2개)가 없으면 모드 계산 불가
+                self.send_error(404, 'No enough RSI data found for or before the given date')
+                return
 
-            self.send_error(404, 'Mode not found for the given date')
+            # step 2) 가장 최근 금요일(= filtered_rsi의 마지막 인덱스) RSI를 찾음
+            qqq_rsi_late = filtered_rsi.iloc[-1]
+            # 바로 이전 금요일 RSI
+            qqq_rsi_late_late = filtered_rsi.iloc[-2]
+
+            last_date = filtered_rsi.index[-1].strftime('%Y-%m-%d')
+
+            # 모드 계산
+            mode = this_week_mode(qqq_rsi_late, qqq_rsi_late_late)
+
+            # mode.json에 저장
+            add_data_to_json(last_date, mode)
+
+            # 응답 전송
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"date": last_date, "mode": mode}).encode())
         except Exception as e:
             self.send_error(500, f'Internal Server Error: {str(e)}')
