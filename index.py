@@ -4,7 +4,16 @@ import pandas as pd
 import json
 from datetime import datetime
 from wilder_rsi import calculate_rsi
-from write_mode import add_data_to_json
+# supabase-py 로부터 Supabase 클라이언트 불러오기
+from supabase import create_client, Client
+import os
+
+def create_supabase_client() -> Client:
+    # Supabase URL과 KEY를 환경 변수에서 읽어오는 방식으로 처리
+    # (Vercel 환경에서 환경 변수를 설정해두면 os.environ로 접근 가능)
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ANON_KEY")
+    return create_client(supabase_url, supabase_key)
 
 def this_week_mode(qqq_rsi_late, qqq_rsi_late_late):
     qqq_up = qqq_rsi_late_late < qqq_rsi_late
@@ -25,6 +34,13 @@ def this_week_mode(qqq_rsi_late, qqq_rsi_late_late):
 
     return "이전모드"
 
+def add_data_to_db(date_str, mode_str):
+    # Supabase client 생성
+    supabase = create_supabase_client()
+    # "mode" 테이블에 Insert
+    response = supabase.table("mode").insert({"date": date_str, "mode": mode_str}).execute()
+    return response
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         # 쿼리 문자열에서 date 파라미터 추출
@@ -41,28 +57,25 @@ class handler(BaseHTTPRequestHandler):
             self.send_error(400, f"Invalid date format: {date_str}")
             return
 
-        # mode.json을 읽어오기(없으면 새로 생성)
-        try:
-            with open("mode.json", "r", encoding="utf-8") as file:
-                data = json.load(file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            data = []
-
-        # 기존에 저장된 데이터 중 동일 날짜 있으면 바로 응답
-        existing_entry = next((entry for entry in data if entry['date'] == date_str), None)
-        if existing_entry:
+        # Supabase에서 이미 "mode" 테이블에 해당 date가 있는지 확인
+        supabase = create_supabase_client()
+        check_res = supabase.from_("mode").select("*").eq("date", date_str).execute()
+        
+        if check_res.data and len(check_res.data) > 0:
+            # 이미 저장된 레코드가 있다면, 그 정보를 바로 반환
+            existing_entry = check_res.data[0]
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps(existing_entry).encode())
             return
-
-        # 야후 파이낸스로부터 데이터 가져오기
+        
+        # 야후 파이낸스 데이터 가져와서 계산하기
         try:
             qqq_data = yf.Ticker("QQQ")
             recent_close_prices = qqq_data.history(period="1y")
             
-            # 인덱스에서 타임존 제거(또는 tz_convert(None))
+            # 인덱스에서 타임존 제거
             recent_close_prices.index = recent_close_prices.index.tz_localize(None)
             
             # 금요일 데이터만 추출
@@ -86,16 +99,16 @@ class handler(BaseHTTPRequestHandler):
             last_date = filtered_rsi.index[-1].strftime('%Y-%m-%d')
 
             # 모드 계산
-            mode = this_week_mode(qqq_rsi_late, qqq_rsi_late_late)
+            mode_calc = this_week_mode(qqq_rsi_late, qqq_rsi_late_late)
 
-            # mode.json에 저장 (write_mode.py에서 add_data_to_json을 호출)
-            add_data_to_json(last_date, mode)
+            # Supabase DB에 저장
+            add_data_to_db(last_date, mode_calc)
 
             # 응답
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({"date": last_date, "mode": mode}).encode())
+            self.wfile.write(json.dumps({"date": last_date, "mode": mode_calc}).encode())
 
         except Exception as e:
             self.send_error(500, f'Internal Server Error: {str(e)}')
