@@ -35,11 +35,21 @@ def this_week_mode(qqq_rsi_late, qqq_rsi_late_late):
     return "이전모드"
 
 def add_data_to_db(date_str, mode_str):
-    # Supabase client 생성
     supabase = create_supabase_client()
-    # "mode" 테이블에 Insert
+
+    # 먼저 같은 날짜가 이미 있는지 확인
+    existing_row = supabase.from_("mode").select("*").eq("date", date_str).execute()
+
+    # 해당 date가 이미 있다면, 새로 추가하지 않고 바로 반환
+    if existing_row.data and len(existing_row.data) > 0:
+        return existing_row.data[0]
+
+    # 없으면 새 레코드 삽입
     response = supabase.table("mode").insert({"date": date_str, "mode": mode_str}).execute()
-    return response
+    if response.data and len(response.data) > 0:
+        return response.data[0]
+    else:
+        return None
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -101,14 +111,18 @@ class handler(BaseHTTPRequestHandler):
             # 모드 계산
             mode_calc = this_week_mode(qqq_rsi_late, qqq_rsi_late_late)
 
-            # Supabase DB에 저장
-            add_data_to_db(last_date, mode_calc)
-
-            # 응답
+            # 여기가 핵심: add_data_to_db가 이미 날짜가 있으면 새로 추가 안 함
+            new_entry = add_data_to_db(last_date, mode_calc)
+            
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({"date": last_date, "mode": mode_calc}).encode())
+
+            if new_entry:
+                self.wfile.write(json.dumps(new_entry).encode())
+            else:
+                # 혹시 insert 실패 시 응답
+                self.wfile.write(json.dumps({"date": last_date, "mode": mode_calc}).encode())
 
         except Exception as e:
             self.send_error(500, f'Internal Server Error: {str(e)}')
