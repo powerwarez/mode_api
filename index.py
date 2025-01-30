@@ -27,10 +27,13 @@ def this_week_mode(qqq_rsi_late, qqq_rsi_late_late):
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        # 쿼리 문자열에서 date 파라미터 추출
         date_str = self.path.split('?date=')[-1]
-        if not date_str:
-            self.send_error(400, 'Date is required')
-            return
+        
+        # date 파라미터가 비어 있거나 ?date= 형태가 들어오지 않았다면, 오늘 날짜로 기본값 설정
+        if not date_str or date_str == self.path:
+            today = datetime.now().strftime('%Y-%m-%d')
+            date_str = today
 
         try:
             with open("mode.json", "r", encoding="utf-8") as file:
