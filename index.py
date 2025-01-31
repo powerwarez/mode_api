@@ -15,49 +15,6 @@ def create_supabase_client() -> Client:
     supabase_key = os.environ.get("SUPABASE_SERVICE_ANON_KEY")
     return create_client(supabase_url, supabase_key)
 
-def add_data_to_single_json_array(date_str, mode_str):
-    """
-    1) 'id=1'인 행을 읽어서,
-    2) mode(배열) 안에 {'date': date_str, 'mode': mode_str}가 없으면 추가.
-    3) 최종적으로 업데이트/삽입 뒤 그 데이터 반환.
-    """
-    supabase = create_supabase_client()
-
-    # id=1인 행이 있는지 검색
-    existing_rows = supabase.from_("mode").select("*").eq("id", 1).execute()
-    if existing_rows.data and len(existing_rows.data) > 0:
-        row = existing_rows.data[0]
-        # row["mode"]는 이미 저장된 배열 (예: [{"date":"...", "mode":"..."}])
-        arr = row["mode"]
-    else:
-        # 아직 id=1 행이 없으면 새로 만들 준비
-        row = None
-        arr = []
-
-    # 이미 해당 date가 있는지 확인
-    is_existing = any(item["date"] == date_str for item in arr if "date" in item)
-    if is_existing:
-        # 이미 동일 date가 있으면 새로 추가 안 함
-        return row
-
-    # 없다면 새로 추가
-    arr.append({"date": date_str, "mode": mode_str})
-
-    if row:
-        # 기존 행이 있으면 update
-        updated = supabase.table("mode").update({"mode": arr}).eq("id", 1).execute()
-        if updated.data and len(updated.data) > 0:
-            return updated.data[0]
-        else:
-            return None
-    else:
-        # 아직 행이 없었으므로 insert
-        inserted = supabase.table("mode").insert({"id": 1, "mode": arr}).execute()
-        if inserted.data and len(inserted.data) > 0:
-            return inserted.data[0]
-        else:
-            return None
-
 def this_week_mode(qqq_rsi_late, qqq_rsi_late_late):
     qqq_up = qqq_rsi_late_late < qqq_rsi_late
 
@@ -76,6 +33,67 @@ def this_week_mode(qqq_rsi_late, qqq_rsi_late_late):
         return "aggressive"
 
     return "previous"
+
+def get_or_create_single_row():
+    """
+    mode 테이블에서 첫 행을 가져오고, 없으면 새로 insert해 반환.
+    반환값 예: {'id': 2, 'mode': []} (파이썬 딕셔너리)
+    """
+    supabase = create_supabase_client()
+    # 아무 조건 없이 select -> 첫 번째 row만 확인
+    existing = supabase.from_("mode").select("*").execute()
+    if existing.data and len(existing.data) > 0:
+        # 이미 row가 있으면 그 중 첫 번째 값 반환
+        return existing.data[0]
+    else:
+        # 아직 데이터가 없으면 빈 배열로 새 row insert
+        inserted = supabase.table("mode").insert({"mode": []}).execute()
+        if inserted.data and len(inserted.data) > 0:
+            return inserted.data[0]
+        else:
+            return None
+
+def add_data_to_single_json_array(date_str, mode_str):
+    """
+    1) 'mode' 테이블에서 첫 행(row)을 가져온다 (혹은 없으면 새로 만든다).
+    2) 그 행의 'mode' 필드(배열)에 date_str가 이미 있나 확인 -> 없으면 추가
+    3) 최종적으로 update 후 해당 row 반환
+    """
+    supabase = create_supabase_client()
+
+    # (1) 이미 존재하는 단일 row를 가져오거나 (없으면 새로 만들기)
+    row = get_or_create_single_row()
+    if not row:
+        # row 생성 실패 시 None 반환
+        return None
+
+    arr = row["mode"]  # jsonb 배열(파이썬 list)
+    if not isinstance(arr, list):
+        # 혹시 mode 필드가 배열이 아니면 새 배열로 reset
+        arr = []
+
+    # 이미 date_str가 존재하는가?
+    is_existing = any(item["date"] == date_str for item in arr if "date" in item)
+    if is_existing:
+        # 이미 있으면 중복 추가 안 함
+        return row
+
+    # 새로 추가
+    arr.append({"date": date_str, "mode": mode_str})
+
+    # (3) update
+    updated = supabase.table("mode").update({"mode": arr}).eq("id", row["id"]).execute()
+    if updated.data and len(updated.data) > 0:
+        return updated.data[0]
+    else:
+        return None
+
+def calculate_rsi(data, window=14):
+    delta = data['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -129,21 +147,18 @@ class handler(BaseHTTPRequestHandler):
 
             # Supabase에서 해당 날짜 데이터를 가져오기
             supabase = create_supabase_client()
-            final_query = supabase.from_("mode").select("*").eq("id", 1).execute()
+            final_query = supabase.from_("mode").select("*").limit(1).execute()
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
 
             if final_query.data and len(final_query.data) > 0:
-                final_entry = final_query.data[0]  # {"id":..., "mode": {"date": "...", "mode": "..."} }
-                self.send_response(200)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(final_entry).encode())
+                self.wfile.write(json.dumps(final_query.data[0]).encode())
             else:
-                # 혹시 DB에 없다면 직접 응답
-                self.send_response(200)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                unknown_json = {"id": 1, "mode": []}
-                self.wfile.write(json.dumps(unknown_json).encode())
+                # 아무 행도 없다면
+                empty_result = {"mode": []}
+                self.wfile.write(json.dumps(empty_result).encode())
 
         except Exception as e:
             self.send_error(500, f"Internal Server Error: {str(e)}")
