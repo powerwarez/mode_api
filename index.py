@@ -120,7 +120,22 @@ def get_last_non_previous_mode(date_str: str) -> str:
     return "previous"
 
 class handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        # Preflight 요청 처리
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.end_headers()
+
     def do_GET(self):
+        # CORS 허용 헤더 추가
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.end_headers()
+
         # 0) 날짜 파라미터
         date_str = self.path.split('?date=')[-1]
         if not date_str or date_str == self.path:
