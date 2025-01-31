@@ -94,6 +94,31 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
+def get_last_non_previous_mode(date_str: str) -> str:
+    """
+    date_str보다 이전(과거) 날짜들 중에서 'previous'가 아닌 가장 최근 모드를 찾아서 반환.
+    찾지 못하면 'previous'를 반환.
+    """
+    supabase = create_supabase_client()
+    row = get_or_create_single_row()
+    if not row:
+        return "previous"
+
+    arr = row.get("mode", [])
+    if not isinstance(arr, list):
+        return "previous"
+
+    # date 필드가 date_str 보다 작은(과거) 데이터를 모두 가져옴
+    past_modes = [item for item in arr if item.get("date", "") < date_str]
+
+    # 날짜 오름차순 정렬 후 뒤에서부터 탐색
+    past_modes.sort(key=lambda x: x["date"])
+    for item in reversed(past_modes):
+        if item.get("mode") != "previous":
+            return item["mode"]
+
+    return "previous"
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         # 0) 날짜 파라미터
@@ -139,6 +164,10 @@ class handler(BaseHTTPRequestHandler):
                 curr_date_str = rsi_target_range.index[i].strftime('%Y-%m-%d')
 
                 mode_calculated = this_week_mode(curr_rsi, prev_rsi)
+                # 추가 로직: 만약 "previous"라면, 직전(더 이전) 데이터 중 "previous"가 아닌 모드를 찾아서 대체
+                if mode_calculated == "previous":
+                    mode_calculated = get_last_non_previous_mode(curr_date_str)
+
                 add_data_to_single_json_array(curr_date_str, mode_calculated)
 
             # 6) 최종적으로 가장 최근 금요일(rsi_up_to_requested.index[-1]) 날짜
