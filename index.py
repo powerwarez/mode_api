@@ -55,33 +55,32 @@ def get_or_create_single_row():
 
 def add_data_to_single_json_array(date_str, mode_str):
     """
-    1) 'mode' 테이블에서 첫 행(row)을 가져온다 (혹은 없으면 새로 만든다).
+    1) 'mode' 테이블에서 첫 행(row)을 가져오거나 (없으면 새로 만든다).
     2) 그 행의 'mode' 필드(배열)에 date_str가 이미 있나 확인 -> 없으면 추가
     3) 최종적으로 update 후 해당 row 반환
     """
     supabase = create_supabase_client()
 
-    # (1) 이미 존재하는 단일 row를 가져오거나 (없으면 새로 만들기)
     row = get_or_create_single_row()
     if not row:
-        # row 생성 실패 시 None 반환
         return None
 
-    arr = row["mode"]  # jsonb 배열(파이썬 list)
+    arr = row["mode"]
     if not isinstance(arr, list):
-        # 혹시 mode 필드가 배열이 아니면 새 배열로 reset
         arr = []
 
-    # 이미 date_str가 존재하는가?
+    # 이미 date_str가 존재하는지 확인
     is_existing = any(item["date"] == date_str for item in arr if "date" in item)
     if is_existing:
-        # 이미 있으면 중복 추가 안 함
         return row
 
-    # 새로 추가
+    # 새로 데이터 추가
     arr.append({"date": date_str, "mode": mode_str})
 
-    # (3) update
+    # date 기준 정렬
+    arr.sort(key=lambda x: x["date"])
+
+    # 업데이트
     updated = supabase.table("mode").update({"mode": arr}).eq("id", row["id"]).execute()
     if updated.data and len(updated.data) > 0:
         return updated.data[0]
