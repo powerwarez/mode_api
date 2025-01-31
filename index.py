@@ -192,9 +192,9 @@ class handler(BaseHTTPRequestHandler):
             supabase = create_supabase_client()
             final_query = supabase.from_("mode").select("*").limit(1).execute()
 
-            self.send_response(200)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
+            # self.send_response(200)
+            # self.send_header("Content-type", "application/json")
+            # self.end_headers()
 
             if final_query.data and len(final_query.data) > 0:
                 self.wfile.write(json.dumps(final_query.data[0]).encode())
