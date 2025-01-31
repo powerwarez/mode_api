@@ -109,7 +109,7 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # 1) 한 달 전 날짜 계산
-        start_date = requested_date - timedelta(days=30)
+        start_date = requested_date - timedelta(days=60)
 
         try:
             # 2) 야후 파이낸스에서 1년 치 QQQ 데이터 받아와 RSI 계산
