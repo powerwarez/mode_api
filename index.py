@@ -155,7 +155,10 @@ class handler(BaseHTTPRequestHandler):
             qqq_data = yf.Ticker("QQQ")
             recent_close_prices = qqq_data.history(period="1y")
             # 타임존 제거
-            recent_close_prices.index = recent_close_prices.index.tz_localize(None)
+            if hasattr(recent_close_prices.index, "tz"):
+                recent_close_prices.index = recent_close_prices.index.tz_convert(None)
+
+            # recent_close_prices.index = recent_close_prices.index.tz_localize(None)
             # 금요일 데이터만 추출
             friday_data = recent_close_prices[recent_close_prices.index.weekday == 4]
             rsi_values = calculate_rsi(friday_data)
