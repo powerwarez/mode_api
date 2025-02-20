@@ -154,8 +154,10 @@ class handler(BaseHTTPRequestHandler):
             # 2) 야후 파이낸스에서 1년 치 QQQ 데이터 받아와 RSI 계산
             qqq_data = yf.Ticker("QQQ")
             recent_close_prices = qqq_data.history(period="1y")
-            # 타임존 제거
-            recent_close_prices.index = recent_close_prices.index.tz_localize(None)
+            # 인덱스를 DatetimeIndex로 변환 후 타임존 제거
+            recent_close_prices.index = pd.to_datetime(recent_close_prices.index)
+            if recent_close_prices.index.tz is not None:
+                recent_close_prices.index = recent_close_prices.index.tz_localize(None)
             # 금요일 데이터만 추출
             friday_data = recent_close_prices[recent_close_prices.index.weekday == 4]
             rsi_values = calculate_rsi(friday_data)
