@@ -160,7 +160,7 @@ class handler(BaseHTTPRequestHandler):
 
             # recent_close_prices.index = recent_close_prices.index.tz_localize(None)
             # 금요일 데이터만 추출
-            friday_data = recent_close_prices[recent_close_prices.index.weekday == 4]
+            friday_data = recent_close_prices[recent_close_prices.index.dayofweek == 4]
             rsi_values = calculate_rsi(friday_data)
 
             # 3) requested_date 이하만 필터링
