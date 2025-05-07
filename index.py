@@ -3,8 +3,6 @@ import yfinance as yf
 import pandas as pd
 import json
 from datetime import datetime, timedelta
-from wilder_rsi import calculate_rsi
-# supabase-py 로부터 Supabase 클라이언트 불러오기
 from supabase import create_client, Client
 import os
 
@@ -121,36 +119,25 @@ def get_last_non_previous_mode(date_str: str) -> str:
 
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
-        # Preflight 요청 처리
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self._send_cors_headers(200)
         self.end_headers()
 
     def do_GET(self):
-        # CORS 허용 헤더 추가
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        self.end_headers()
-
-        # 0) 날짜 파라미터
-        date_str = self.path.split('?date=')[-1]
-        if not date_str or date_str == self.path:
-            date_str = datetime.now().strftime('%Y-%m-%d')
-
         try:
-            requested_date = datetime.strptime(date_str, "%Y-%m-%d")
-        except ValueError:
-            self.send_error(400, f"Invalid date format: {date_str}")
-            return
+            # 0) 날짜 파라미터
+            date_str = self.path.split('?date=')[-1]
+            if not date_str or date_str == self.path:
+                date_str = datetime.now().strftime('%Y-%m-%d')
 
-        # 1) 한 달 전 날짜 계산
-        start_date = requested_date - timedelta(days=60)
+            try:
+                requested_date = datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                self._send_json_error(400, f"Invalid date format: {date_str}")
+                return
 
-        try:
+            # 1) 한 달 전 날짜 계산
+            start_date = requested_date - timedelta(days=60)
+
             # 2) 야후 파이낸스에서 1년 치 QQQ 데이터 받아와 RSI 계산
             qqq_data = yf.Ticker("QQQ")
             recent_close_prices = qqq_data.history(period="1y")
@@ -165,13 +152,13 @@ class handler(BaseHTTPRequestHandler):
             # 3) requested_date 이하만 필터링
             rsi_up_to_requested = rsi_values.loc[rsi_values.index <= requested_date]
             if len(rsi_up_to_requested) < 2:
-                self.send_error(404, "No enough RSI data found on or before the given date")
+                self._send_json_error(404, "No enough RSI data found on or before the given date")
                 return
 
             # 4) start_date 이상, requested_date 이하 금요일 RSI만 추출
             rsi_target_range = rsi_up_to_requested.loc[rsi_up_to_requested.index >= start_date]
             if len(rsi_target_range) < 2:
-                self.send_error(404, "No Friday RSI data found in the last month range")
+                self._send_json_error(404, "No Friday RSI data found in the last month range")
                 return
 
             # 5) 범위 내 모든 연속된 금요일 쌍에 대해 모드 계산 + Supabase 저장
@@ -194,16 +181,35 @@ class handler(BaseHTTPRequestHandler):
             supabase = create_supabase_client()
             final_query = supabase.from_("mode").select("*").limit(1).execute()
 
-            # self.send_response(200)
-            # self.send_header("Content-type", "application/json")
-            # self.end_headers()
-
             if final_query.data and len(final_query.data) > 0:
-                self.wfile.write(json.dumps(final_query.data[0]).encode())
+                self._send_json_response(200, final_query.data[0])
             else:
                 # 아무 행도 없다면
                 empty_result = {"mode": []}
-                self.wfile.write(json.dumps(empty_result).encode())
+                self._send_json_response(200, empty_result)
 
         except Exception as e:
-            self.send_error(500, f"Internal Server Error: {str(e)}")
+            # 모든 예외를 처리하고 클라이언트에게 적절한 오류 메시지를 반환
+            self._send_json_error(500, f"Internal Server Error: {str(e)}")
+
+    def _send_cors_headers(self, status_code):
+        """CORS 헤더를 응답에 추가합니다."""
+        self.send_response(status_code)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+    def _send_json_response(self, status_code, data):
+        """JSON 응답을 클라이언트에게 전송합니다."""
+        self._send_cors_headers(status_code)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+    def _send_json_error(self, status_code, message):
+        """JSON 형식의 오류 메시지를 클라이언트에게 전송합니다."""
+        self._send_cors_headers(status_code)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        error_response = {"error": message}
+        self.wfile.write(json.dumps(error_response).encode()) 
