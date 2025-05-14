@@ -51,7 +51,7 @@ def get_or_create_single_row():
         else:
             return None
 
-def add_data_to_single_json_array(date_str, mode_str):
+def add_data_to_single_json_array(date_str, mode_str, rsi_value=None, prev_rsi_value=None):
     """
     1) 'mode' 테이블에서 id가 1인 행(row)을 가져오거나 (없으면 새로 만든다).
     2) 그 행의 'mode' 필드(배열)에 date_str가 이미 있나 확인 -> 없으면 추가
@@ -72,8 +72,13 @@ def add_data_to_single_json_array(date_str, mode_str):
     if is_existing:
         return row
 
-    # 새로 데이터 추가
-    arr.append({"date": date_str, "mode": mode_str})
+    # 새로 데이터 추가 (rsi 값 포함)
+    new_item = {"date": date_str, "mode": mode_str}
+    if prev_rsi_value is not None:
+        new_item["prev_rsi"] = float(prev_rsi_value)
+    if rsi_value is not None:
+        new_item["rsi"] = float(rsi_value)
+    arr.append(new_item)
 
     # date 기준 정렬
     arr.sort(key=lambda x: x["date"])
@@ -172,7 +177,7 @@ class handler(BaseHTTPRequestHandler):
                 if mode_calculated == "previous":
                     mode_calculated = get_last_non_previous_mode(curr_date_str)
 
-                add_data_to_single_json_array(curr_date_str, mode_calculated)
+                add_data_to_single_json_array(curr_date_str, mode_calculated, curr_rsi, prev_rsi)
 
             # 6) 최종적으로 가장 최근 금요일(rsi_up_to_requested.index[-1]) 날짜
             final_date = rsi_up_to_requested.index[-1].strftime('%Y-%m-%d')
