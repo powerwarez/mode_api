@@ -34,18 +34,18 @@ def this_week_mode(qqq_rsi_late, qqq_rsi_late_late):
 
 def get_or_create_single_row():
     """
-    mode 테이블에서 첫 행을 가져오고, 없으면 새로 insert해 반환.
-    반환값 예: {'id': 2, 'mode': []} (파이썬 딕셔너리)
+    mode 테이블에서 id가 1인 행을 가져오고, 없으면 id를 1로 지정하여 새로 insert해 반환.
+    반환값 예: {'id': 1, 'mode': []} (파이썬 딕셔너리)
     """
     supabase = create_supabase_client()
-    # 아무 조건 없이 select -> 첫 번째 row만 확인
-    existing = supabase.from_("mode").select("*").execute()
+    # id가 1인 row만 확인
+    existing = supabase.from_("mode").select("*").eq("id", 1).execute()
     if existing.data and len(existing.data) > 0:
-        # 이미 row가 있으면 그 중 첫 번째 값 반환
+        # id가 1인 row가 있으면 반환
         return existing.data[0]
     else:
-        # 아직 데이터가 없으면 빈 배열로 새 row insert
-        inserted = supabase.table("mode").insert({"mode": []}).execute()
+        # id가 1인 row가 없으면 id를 1로 지정하여 빈 배열로 새 row insert
+        inserted = supabase.table("mode").insert({"id": 1, "mode": []}).execute()
         if inserted.data and len(inserted.data) > 0:
             return inserted.data[0]
         else:
@@ -53,9 +53,9 @@ def get_or_create_single_row():
 
 def add_data_to_single_json_array(date_str, mode_str):
     """
-    1) 'mode' 테이블에서 첫 행(row)을 가져오거나 (없으면 새로 만든다).
+    1) 'mode' 테이블에서 id가 1인 행(row)을 가져오거나 (없으면 새로 만든다).
     2) 그 행의 'mode' 필드(배열)에 date_str가 이미 있나 확인 -> 없으면 추가
-    3) 최종적으로 update 후 해당 row 반환
+    3) 최종적으로 id가 1인 행만 update 후 해당 row 반환
     """
     supabase = create_supabase_client()
 
@@ -78,8 +78,8 @@ def add_data_to_single_json_array(date_str, mode_str):
     # date 기준 정렬
     arr.sort(key=lambda x: x["date"])
 
-    # 업데이트
-    updated = supabase.table("mode").update({"mode": arr}).eq("id", row["id"]).execute()
+    # 업데이트 - id가 1인 행만 업데이트
+    updated = supabase.table("mode").update({"mode": arr}).eq("id", 1).execute()
     if updated.data and len(updated.data) > 0:
         return updated.data[0]
     else:
@@ -95,7 +95,7 @@ def calculate_rsi(data, window=14):
 def get_last_non_previous_mode(date_str: str) -> str:
     """
     date_str보다 이전(과거) 날짜들 중에서 'previous'가 아닌 가장 최근 모드를 찾아서 반환.
-    찾지 못하면 'previous'를 반환.
+    id가 1인 행에서만 데이터를 검색하며, 찾지 못하면 'previous'를 반환.
     """
     supabase = create_supabase_client()
     row = get_or_create_single_row()
@@ -179,13 +179,13 @@ class handler(BaseHTTPRequestHandler):
 
             # Supabase에서 해당 날짜 데이터를 가져오기
             supabase = create_supabase_client()
-            final_query = supabase.from_("mode").select("*").limit(1).execute()
+            final_query = supabase.from_("mode").select("*").eq("id", 1).execute()
 
             if final_query.data and len(final_query.data) > 0:
                 self._send_json_response(200, final_query.data[0])
             else:
-                # 아무 행도 없다면
-                empty_result = {"mode": []}
+                # id가 1인 행이 없다면
+                empty_result = {"id": 1, "mode": []}
                 self._send_json_response(200, empty_result)
 
         except Exception as e:
